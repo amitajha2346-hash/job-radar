@@ -73,7 +73,12 @@ jobs:
           mkdir -p data
           CFG=""
           [ -n "$CONFIG_PATH" ] && CFG="--config $CONFIG_PATH"
-          if [ "$SEED_INPUT" = "true" ]; then
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            # No Telegram yet: preview matches in the log but save NOTHING, so
+            # these jobs are still "new" once the secrets are added.
+            echo "::warning::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set -> dry run, nothing saved."
+            python run.py $CFG --dry-run -v
+          elif [ "$SEED_INPUT" = "true" ]; then
             echo "Seed requested -> silent baseline; no alerts this run."
             python run.py $CFG --seed -v
           elif [ "$SEED_INPUT" = "false" ]; then
