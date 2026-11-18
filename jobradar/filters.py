@@ -67,6 +67,10 @@ class Matcher:
         # drop_locations = optional extra denylist, applied even inside the
         # region (e.g. a city she'd never commute to). Default: none.
         self.drop_locations = [l.lower() for l in cfg.get("drop_locations", [])]
+        # remote_only_outside_home: outside home_locations keep ONLY roles that
+        # are explicitly remote (drops hybrid and unknown work mode). Off by
+        # default, so existing profiles behave exactly as before.
+        self.remote_only_outside_home = bool(cfg.get("remote_only_outside_home", False))
 
     def matches(self, job: Job) -> bool:
         # Exclude keywords always apply (drop interns/working students etc.).
@@ -115,7 +119,10 @@ class Matcher:
             return True
         if self.drop_locations and any(d in loc for d in self.drop_locations):
             return False
-        if job.effective_work_mode() == "onsite":
+        mode = job.effective_work_mode()
+        if mode == "onsite":
+            return False
+        if self.remote_only_outside_home and mode != "remote":
             return False
         if any(r in loc for r in self.region_locations):
             return True

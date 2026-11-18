@@ -38,7 +38,7 @@ def _val(v: Any) -> str:
     return "" if s.lower() in ("nan", "nat", "none") else s
 
 
-def _scrape(scrape_jobs, **kwargs) -> list[Job]:
+def _scrape(scrape_jobs, force_remote: bool = False, **kwargs) -> list[Job]:
     df = scrape_jobs(**kwargs)
     if df is None or len(df) == 0:
         return []
@@ -49,7 +49,9 @@ def _scrape(scrape_jobs, **kwargs) -> list[Job]:
             continue
         # JobSpy emits an is_remote bool; True -> remote. (False is its default,
         # so we treat it as "unknown", not a hard "onsite".)
-        mode = "remote" if rec.get("is_remote") is True else ""
+        # force_remote: the search itself was remote-only, so trust that even
+        # when a board doesn't flag each result.
+        mode = "remote" if force_remote or rec.get("is_remote") is True else ""
         jobs.append(
             Job(
                 source=f"jobspy:{_val(rec.get('site')) or 'board'}",
@@ -88,25 +90,41 @@ def fetch(cfg: dict) -> list[Job]:
 
     out: list[Job] = []
 
-    # 1) plain keyword sweeps
+    # Search locations: `locations` (list) overrides the single `location`.
+    # Each entry is a place string, or {location: ..., remote: true} to ask the
+    # boards for remote roles only (JobSpy's is_remote).
+    loc_entries = js.get("locations") or [location]
+    searches = []
+    for entry in loc_entries:
+        if isinstance(entry, dict):
+            searches.append((entry.get("location", ""), bool(entry.get("remote"))))
+        else:
+            searches.append((entry, False))
+
+    # 1) plain keyword sweeps (every term x every search location)
     for term in js.get("search_terms", []):
-        google_term = f"{term} jobs near {location}".strip() if location else f"{term} jobs"
-        try:
-            found = _scrape(
-                scrape_jobs,
-                site_name=sites,
-                search_term=term,
-                google_search_term=google_term,
-                location=location or None,
-                results_wanted=results_wanted,
-                hours_old=hours_old,
-                country_indeed=country_indeed,
-                linkedin_fetch_description=False,
-            )
-            log.info("jobspy '%s' -> %d postings", term, len(found))
-            out.extend(found)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("jobspy '%s' failed: %s", term, exc)
+        for where, remote in searches:
+            label = f"{term} @ {where or 'anywhere'}{' (remote)' if remote else ''}"
+            near = f"remote {term} jobs in {where}" if remote else f"{term} jobs near {where}"
+            google_term = near.strip() if where else f"{term} jobs"
+            try:
+                found = _scrape(
+                    scrape_jobs,
+                    force_remote=remote,
+                    site_name=sites,
+                    search_term=term,
+                    google_search_term=google_term,
+                    location=where or None,
+                    is_remote=remote,
+                    results_wanted=results_wanted,
+                    hours_old=hours_old,
+                    country_indeed=country_indeed,
+                    linkedin_fetch_description=False,
+                )
+                log.info("jobspy '%s' -> %d postings", label, len(found))
+                out.extend(found)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("jobspy '%s' failed: %s", label, exc)
 
     # 2) Company sweep, routed through Google Jobs. Use this for companies
     #    that DON'T expose a clean ATS feed (big corps on Workday, custom
